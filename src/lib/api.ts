@@ -46,6 +46,7 @@ export interface DbOp {
   order?: { column: string; ascending?: boolean };
   single?: boolean;
   returning?: boolean;
+  adminCode?: string; // segundo factor exigido por el backend para borrar transacciones
 }
 export interface DbResult<T> { data: T | null; error: { message: string; code?: string } | null }
 

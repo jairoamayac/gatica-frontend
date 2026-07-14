@@ -4,7 +4,8 @@ import { Camera, Plus, X } from 'lucide-react';
 import { useStore } from '@/store';
 import { db } from '@/lib/api';
 import { METODOS, ahoraISO, cn, coincide, modeloKey, money, norm } from '@/lib/utils';
-import type { InvItem, VentaItem } from '@/lib/types';
+import type { InvItem, Venta, VentaItem } from '@/lib/types';
+import { imprimirNotaEntrega, numeroNota } from '@/lib/notaEntrega';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -94,7 +95,7 @@ export function Ventas() {
         abono: pagoUSD, saldo,
         cliente: clienteSel, estado,
       };
-      const { error } = await db({ table: 'ventas', action: 'insert', values: reg });
+      const { data: creada, error } = await db<Venta>({ table: 'ventas', action: 'insert', values: reg, returning: true, single: true });
       if (error) { alert('Error al registrar:\n' + error.message); return; }
       for (const c of carrito) {
         const it = inventario.find((x) => x.sku === c.sku);
@@ -102,7 +103,10 @@ export function Ventas() {
       }
       setCarrito([]); setPagado(''); setBs(''); setClienteSel(null); setQCliente('');
       await Promise.all([recargarInv(), recargarVen()]);
-      alert(`${modo === 'venta' ? 'Venta' : 'Apartado'} registrado ✓\nTotal ${money(total)} · Pagado ${money(pagoUSD)}` + (saldo > 0 ? `\nSaldo pendiente ${money(saldo)}` : ''));
+      const num = creada ? ' ' + numeroNota(creada.id) : '';
+      if (creada && confirm(`${modo === 'venta' ? 'Venta' : 'Apartado'}${num} registrado ✓\nTotal ${money(total)} · Pagado ${money(pagoUSD)}` + (saldo > 0 ? `\nSaldo pendiente ${money(saldo)}` : '') + '\n\n¿Imprimir nota de entrega?')) {
+        imprimirNotaEntrega(creada);
+      }
     } finally {
       setGuardando(false);
     }

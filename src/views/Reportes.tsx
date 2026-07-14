@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { AlertTriangle, Download, Trash2 } from 'lucide-react';
+import { AlertTriangle, Download, FileText, Trash2 } from 'lucide-react';
+import { imprimirNotaEntrega, numeroNota } from '@/lib/notaEntrega';
 import { useStore } from '@/store';
 import { db } from '@/lib/api';
 import { diasDesde, edad, fmtFecha, fmtHora, getAbonos, hoyVz, metodoLabel, modeloKey, money, sumAbonos } from '@/lib/utils';
@@ -153,15 +154,18 @@ export function Reportes() {
   };
 
   async function eliminarVenta(v: Venta) {
-    if (!confirm(`¿Eliminar esta ${v.tipo === 'apartado' ? 'apartado' : 'venta'}?\nEl stock de los zapatos volverá al inventario.`)) return;
+    if (!confirm(`¿Eliminar ${numeroNota(v.id)} (${v.tipo})?\nEl stock de los zapatos volverá al inventario.`)) return;
+    const adminCode = prompt('Escribe el código de la administradora para confirmar:');
+    if (!adminCode) return;
+    // Primero se valida el código borrando la venta; solo si pasa, se devuelve el stock.
+    const { error } = await db({ table: 'ventas', action: 'delete', filters: [{ type: 'eq', column: 'id', value: v.id }], adminCode });
+    if (error) { alert('Error:\n' + error.message); return; }
     if (v.estado !== 'cancelado') {
       for (const c of v.items || []) {
         const it = inventario.find((x) => x.sku === c.sku);
         if (it) await db({ table: 'inventario', action: 'update', values: { stock: it.stock + c.cantidad }, filters: [{ type: 'eq', column: 'sku', value: c.sku }] });
       }
     }
-    const { error } = await db({ table: 'ventas', action: 'delete', filters: [{ type: 'eq', column: 'id', value: v.id }] });
-    if (error) { alert('Error:\n' + error.message); return; }
     await Promise.all([recargarInv(), recargarVen()]);
   }
 
@@ -359,6 +363,7 @@ export function Reportes() {
                     <Thumb src={fotoDeSku(v.items?.[0]?.sku)} size={40} />
                     <div className="min-w-0 flex-1">
                       <div className="text-[13.5px] font-medium tabular">
+                        <span className="mr-1.5 font-mono text-[11px] text-muted-foreground">{numeroNota(v.id)}</span>
                         {(v.items || []).reduce((a, i) => a + i.cantidad, 0)} par(es) · {money(v.total)}
                         {saldo > 0 && <span className="text-red-700"> · debe {money(saldo)}</span>}
                       </div>
@@ -367,6 +372,7 @@ export function Reportes() {
                       </div>
                       <div className="truncate text-[11px] text-muted-foreground/80">{(v.items || []).map((i) => i.nombre).join(', ')}</div>
                     </div>
+                    <Button size="icon" variant="soft" title="Nota de entrega" onClick={() => imprimirNotaEntrega(v)}><FileText className="h-3.5 w-3.5" /></Button>
                     {esCeo && <Button size="icon" variant="destructive" onClick={() => eliminarVenta(v)}><Trash2 className="h-3.5 w-3.5" /></Button>}
                   </div>
                 );

@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogBody, DialogFooter, DialogHeader } from '@/components/ui/dialog';
+import { imprimirNotaEntrega, numeroNota } from '@/lib/notaEntrega';
 
 // La columna `cumple` es opcional en la BD. Si no existe, el guardado la omite
 // automáticamente (así no se rompe nada mientras no corran el SQL que la crea).
@@ -159,8 +160,14 @@ function FichaClienta({ clienta, ventas, onClose }: { clienta: Clienta; ventas: 
             return (
               <div key={v.id} className="rounded-lg border px-3 py-2">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="text-[13px] font-medium">{(v.items || []).map((i) => `${i.nombre} ×${i.cantidad}`).join(', ')}</div>
-                  <Badge variant={v.estado === 'pagado' ? 'ok' : 'low'}>{v.estado === 'pagado' ? 'Pagado' : 'Pendiente'}</Badge>
+                  <div className="text-[13px] font-medium">
+                    <span className="mr-1.5 font-mono text-[11px] text-muted-foreground">{numeroNota(v.id)}</span>
+                    {(v.items || []).map((i) => `${i.nombre} ×${i.cantidad}`).join(', ')}
+                  </div>
+                  <div className="flex flex-none items-center gap-1.5">
+                    <Badge variant={v.estado === 'pagado' ? 'ok' : 'low'}>{v.estado === 'pagado' ? 'Pagado' : 'Pendiente'}</Badge>
+                    <Button size="xs" variant="soft" onClick={() => imprimirNotaEntrega(v)}>Nota</Button>
+                  </div>
                 </div>
                 <div className="text-[11.5px] text-muted-foreground tabular">
                   {fmtFecha(v.fecha)} {fmtHora(v.fecha)} · {v.tipo} · {money(v.total)}{metodos ? ' · ' + metodos : ''}

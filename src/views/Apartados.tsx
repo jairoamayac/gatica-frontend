@@ -3,6 +3,7 @@ import { useStore } from '@/store';
 import { db } from '@/lib/api';
 import { METODOS, ahoraISO, diasDesde, fmtFecha, getAbonos, metodoLabel, money, sumAbonos } from '@/lib/utils';
 import type { Venta } from '@/lib/types';
+import { imprimirNotaEntrega, numeroNota } from '@/lib/notaEntrega';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -37,15 +38,17 @@ export function Apartados() {
   }
 
   async function eliminar(v: Venta) {
-    if (!confirm('¿Eliminar este registro?\nEl stock de los zapatos volverá al inventario.')) return;
+    if (!confirm(`¿Eliminar ${numeroNota(v.id)}?\nEl stock de los zapatos volverá al inventario.`)) return;
+    const adminCode = prompt('Escribe el código de la administradora para confirmar:');
+    if (!adminCode) return;
+    const { error } = await db({ table: 'ventas', action: 'delete', filters: [{ type: 'eq', column: 'id', value: v.id }], adminCode });
+    if (error) { alert('Error:\n' + error.message); return; }
     if (v.estado !== 'cancelado') {
       for (const c of v.items || []) {
         const it = inventario.find((x) => x.sku === c.sku);
         if (it) await db({ table: 'inventario', action: 'update', values: { stock: it.stock + c.cantidad }, filters: [{ type: 'eq', column: 'sku', value: c.sku }] });
       }
     }
-    const { error } = await db({ table: 'ventas', action: 'delete', filters: [{ type: 'eq', column: 'id', value: v.id }] });
-    if (error) { alert('Error:\n' + error.message); return; }
     await Promise.all([recargarInv(), recargarVen()]);
   }
 
@@ -66,7 +69,9 @@ export function Apartados() {
               <div key={v.id} className="rounded-lg border p-4">
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <div className="text-[14px] font-semibold">{v.cliente?.nombre || 'Sin clienta'}</div>
+                    <div className="text-[14px] font-semibold">{v.cliente?.nombre || 'Sin clienta'}
+                      <span className="ml-1.5 font-mono text-[11px] font-normal text-muted-foreground">{numeroNota(v.id)}</span>
+                    </div>
                     <div className="text-[12px] text-muted-foreground">
                       {fmtFecha(v.fecha)} · hace {dias} día(s) · {(v.items || []).map((i) => i.nombre).join(', ')}
                     </div>
@@ -88,6 +93,7 @@ export function Apartados() {
                 <div className="mt-3 flex flex-wrap gap-1.5">
                   <Button size="sm" onClick={() => setAbonando(v)}>+ Abonar</Button>
                   <Button size="sm" variant="soft" onClick={() => pagarSaldo(v)}>Pagar saldo</Button>
+                  <Button size="sm" variant="secondary" onClick={() => imprimirNotaEntrega(v)}>Nota</Button>
                   <Button size="sm" variant="secondary" onClick={() => cancelar(v)}>Cancelar</Button>
                   {esCeo && <Button size="sm" variant="destructive" onClick={() => eliminar(v)}>Eliminar</Button>}
                 </div>
