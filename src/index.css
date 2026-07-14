@@ -2,26 +2,26 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Tema estilo Stripe Dashboard: blanco, gris #F6F8FA, índigo #635BFF, navy #0A2540 */
+/* Tema marca Gatica estilo Zara: negro, blanco, grises cálidos — sin color de adorno */
 @layer base {
   :root {
     --background: 0 0% 100%;
-    --foreground: 213 73% 15%;
+    --foreground: 0 0% 9%;
     --card: 0 0% 100%;
-    --card-foreground: 213 73% 15%;
-    --primary: 243 100% 68%;
+    --card-foreground: 0 0% 9%;
+    --primary: 0 0% 9%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 210 25% 97%;
-    --secondary-foreground: 213 73% 15%;
-    --muted: 210 25% 97%;
-    --muted-foreground: 215 18% 45%;
-    --accent: 243 100% 97%;
-    --accent-foreground: 243 75% 50%;
+    --secondary: 40 12% 96%;
+    --secondary-foreground: 0 0% 9%;
+    --muted: 40 12% 96%;
+    --muted-foreground: 30 4% 44%;
+    --accent: 40 12% 93%;
+    --accent-foreground: 0 0% 9%;
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
-    --border: 213 24% 91%;
-    --input: 213 24% 88%;
-    --ring: 243 100% 68%;
+    --border: 40 10% 89%;
+    --input: 40 8% 84%;
+    --ring: 0 0% 9%;
   }
   * { @apply border-border; }
   body { @apply bg-background text-foreground font-sans antialiased text-[14px]; }

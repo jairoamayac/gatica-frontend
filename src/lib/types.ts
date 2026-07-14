@@ -15,9 +15,15 @@ export interface InvItem {
   stockMin: number;
 }
 
+export type MetodoPago = 'efectivo_usd' | 'efectivo_bs' | 'pago_movil' | 'punto' | 'zelle' | 'transferencia' | 'otro';
+
 export interface Abono {
   fecha: string;
-  monto: number;
+  monto: number; // siempre en USD (moneda del sistema)
+  metodo?: MetodoPago;
+  moneda?: 'USD' | 'BS';
+  tasa?: number; // Bs por USD, cuando el pago fue en bolívares
+  montoBs?: number; // lo que entregó la clienta en Bs
 }
 
 export interface VentaItem {

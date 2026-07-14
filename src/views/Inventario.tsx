@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import JsBarcode from 'jsbarcode';
-import { ChevronDown, ChevronUp, Download, FileUp, Pencil, Plus, Printer, Tag, Trash2, Zap } from 'lucide-react';
+import { ChevronDown, ChevronUp, Download, FileUp, Pencil, Plus, Printer, Tag, Trash2 } from 'lucide-react';
 import { useStore } from '@/store';
 import { db, esDup } from '@/lib/api';
-import { TALLAS_CORRIDA, cn, codColor, codMarca, codModelo, comprimirImagen, estadoStock, generarSku, invToRow, modeloKey, money, norm } from '@/lib/utils';
+import { TALLAS_CORRIDA, cn, codColor, codMarca, codModelo, coincide, comprimirImagen, estadoStock, generarSku, invToRow, modeloKey, money, norm } from '@/lib/utils';
 import { exportarInventario, leerExcel } from '@/lib/excel';
 import { imprimirEtiquetaIndividual, imprimirEtiquetasLote } from '@/lib/print';
 import type { InvItem } from '@/lib/types';
@@ -40,7 +40,7 @@ export function Inventario() {
   const filtrados = useMemo(() => {
     const nq = norm(q);
     return inventario.filter((i) => {
-      if (nq && !norm(`${i.marca} ${i.modelo} ${i.nombre} ${i.color} ${i.sku} ${i.talla}`).includes(nq)) return false;
+      if (nq && !coincide(i, q)) return false;
       if (fColor && norm(i.color) !== fColor) return false;
       if (fModelo && norm(i.modelo) !== fModelo) return false;
       if (soloBajo && i.stock > i.stockMin) return false;
@@ -80,22 +80,9 @@ export function Inventario() {
     await recargarInv();
   }
 
-  async function optimizarFotos() {
-    if (!confirm('Esto moverá las fotos a un formato más liviano (una por modelo) para acelerar la app. Solo hace falta una vez. ¿Continuar?')) return;
-    const { data, error } = await db<{ marca: string; modelo: string; color: string; foto: string | null }[]>({ table: 'inventario', action: 'select', select: 'marca,modelo,color,foto' });
-    if (error || !data) { alert('Error: ' + (error?.message || '')); return; }
-    const byKey: Record<string, string> = {};
-    data.forEach((r) => { if (r.foto) { const k = modeloKey(r); if (!byKey[k]) byKey[k] = r.foto; } });
-    const ups = Object.entries(byKey).map(([modelo_key, foto]) => ({ modelo_key, foto }));
-    if (ups.length) {
-      const { error: e2 } = await db({ table: 'fotos', action: 'upsert', values: ups });
-      if (e2) { alert('Error guardando fotos: ' + e2.message); return; }
-    }
-    await db({ table: 'inventario', action: 'update', values: { foto: null }, filters: [{ type: 'gt', column: 'id', value: 0 }] });
-    await Promise.all([recargarFotos(), recargarInv()]);
-    alert('Fotos optimizadas ✓\nModelos con foto: ' + ups.length);
-  }
-
+  // Nota: las fotos SIEMPRE se guardan optimizadas al registrar el producto
+  // (comprimidas a 480px y una sola por modelo en la tabla `fotos`), así que
+  // ya no existe el proceso manual de "optimizar fotos".
   const toggleSel = (id: number) => setSeleccion((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
   return (
@@ -106,7 +93,6 @@ export function Inventario() {
             <Button onClick={() => setDlgItem({})}><Plus className="h-4 w-4" /> Agregar zapato</Button>
             <Button variant="secondary" onClick={() => setDlgImport(true)}><FileUp className="h-4 w-4" /> Importar Excel</Button>
             <Button variant="secondary" onClick={() => exportarInventario(inventario)}><Download className="h-4 w-4" /> Exportar Excel</Button>
-            <Button variant="soft" onClick={optimizarFotos}><Zap className="h-4 w-4" /> Optimizar fotos</Button>
           </CardContent>
         </Card>
       )}
@@ -124,7 +110,7 @@ export function Inventario() {
               {opciones('modelo').map(([k, t]) => <option key={k} value={k}>{t}</option>)}
             </Select>
             <label className="flex items-center gap-2 text-[13px] font-medium">
-              <input type="checkbox" checked={soloBajo} onChange={(e) => setSoloBajo(e.target.checked)} className="h-4 w-4 rounded border-input accent-[#635BFF]" />
+              <input type="checkbox" checked={soloBajo} onChange={(e) => setSoloBajo(e.target.checked)} className="h-4 w-4 rounded border-input accent-black" />
               Solo stock bajo / agotado
             </label>
           </div>
@@ -178,7 +164,7 @@ export function Inventario() {
                         const e = estadoStock(i);
                         return (
                           <div key={i.id} className="flex items-center gap-2.5 border-b border-dashed py-2 last:border-0">
-                            {esCeo && <input type="checkbox" checked={seleccion.has(i.id)} onChange={() => toggleSel(i.id)} className="h-4 w-4 flex-none rounded accent-[#635BFF]" />}
+                            {esCeo && <input type="checkbox" checked={seleccion.has(i.id)} onChange={() => toggleSel(i.id)} className="h-4 w-4 flex-none rounded accent-black" />}
                             <div className="min-w-0 flex-1">
                               <span className="text-[13.5px] font-semibold">Talla {i.talla}</span>
                               <span className="text-[13px] text-muted-foreground"> · Stock {i.stock} · {money(i.precio)} </span>
@@ -481,7 +467,7 @@ function PrintDialog({ open, onClose, items }: { open: boolean; onClose: () => v
         <div className="space-y-1.5 text-[13.5px]">
           {([['sku', 'Una por modelo/talla (SKU)'], ['stock', 'Una por cada par en stock'], ['fijo', 'Cantidad fija:']] as const).map(([v, t]) => (
             <label key={v} className="flex items-center gap-2 font-medium">
-              <input type="radio" name="copias" checked={modo === v} onChange={() => setModo(v)} className="accent-[#635BFF]" />
+              <input type="radio" name="copias" checked={modo === v} onChange={() => setModo(v)} className="accent-black" />
               {t}
               {v === 'fijo' && <Input type="number" value={fijo} onChange={(e) => setFijo(e.target.value)} className="h-7 w-20" />}
             </label>

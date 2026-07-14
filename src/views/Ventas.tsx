@@ -3,7 +3,7 @@ import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { Camera, Plus, X } from 'lucide-react';
 import { useStore } from '@/store';
 import { db } from '@/lib/api';
-import { ahoraISO, cn, modeloKey, money, norm } from '@/lib/utils';
+import { METODOS, ahoraISO, cn, coincide, modeloKey, money, norm } from '@/lib/utils';
 import type { InvItem, VentaItem } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -20,16 +20,16 @@ export function Ventas() {
   const [clienteSel, setClienteSel] = useState<{ id: number; nombre: string } | null>(null);
   const [qCliente, setQCliente] = useState('');
   const [mostrarClientes, setMostrarClientes] = useState(false);
-  const [abono, setAbono] = useState('');
+  const [metodo, setMetodo] = useState(METODOS[0].id);
+  const [pagado, setPagado] = useState(''); // USD; vacío = total en modo venta, 0 en apartado
+  const [bs, setBs] = useState('');
+  const [tasa, setTasa] = useState(() => localStorage.getItem('gatica_tasa') || '');
   const [scanAbierto, setScanAbierto] = useState(false);
   const [guardando, setGuardando] = useState(false);
 
   const resultados = useMemo(() => {
-    const nq = norm(q);
-    if (!nq) return [];
-    return inventario
-      .filter((i) => norm(`${i.marca} ${i.modelo} ${i.nombre} ${i.color} ${i.sku} talla ${i.talla}`).includes(nq))
-      .slice(0, 15);
+    if (!norm(q)) return [];
+    return inventario.filter((i) => coincide(i, q)).slice(0, 15);
   }, [q, inventario]);
 
   const resultadosCliente = useMemo(() => {
@@ -42,8 +42,12 @@ export function Ventas() {
   }, [qCliente, clientas, clienteSel]);
 
   const total = carrito.reduce((a, c) => a + c.precio * c.cantidad, 0);
-  const abonoNum = modo === 'apartado' ? +abono || 0 : total;
-  const saldo = Math.max(0, total - abonoNum);
+  const monedaPago = METODOS.find((m) => m.id === metodo)?.moneda ?? 'USD';
+  const pagoUSD = monedaPago === 'BS'
+    ? Math.round(((+bs || 0) / (+tasa || 1)) * 100) / 100
+    : pagado === '' ? (modo === 'venta' ? total : 0) : +pagado || 0;
+  const saldo = Math.max(0, total - pagoUSD);
+  const quedaDebiendo = carrito.length > 0 && saldo > 0;
 
   function agregar(i: InvItem) {
     if (i.stock <= 0) { alert('Sin stock disponible'); return; }
@@ -73,11 +77,21 @@ export function Ventas() {
     if (!carrito.length) { alert('El carrito está vacío'); return; }
     setGuardando(true);
     try {
+      if (quedaDebiendo && !clienteSel) {
+        if (!confirm(`Queda debiendo ${money(saldo)} y no elegiste clienta.\n¿Registrar la deuda sin clienta? (Recomendado: asignar clienta para poder cobrar después)`)) return;
+      }
+      if (monedaPago === 'BS' && (+tasa || 0) <= 0) { alert('Indica la tasa Bs/$ para registrar el pago en bolívares.'); return; }
+      if (monedaPago === 'BS') localStorage.setItem('gatica_tasa', tasa);
       const ahora = ahoraISO();
-      const estado = modo === 'apartado' && saldo > 0 ? 'activo' : 'pagado';
+      const estado = saldo > 0 ? 'activo' : 'pagado';
+      const primerAbono = {
+        fecha: ahora, monto: pagoUSD, metodo, moneda: monedaPago,
+        ...(monedaPago === 'BS' ? { tasa: +tasa || 0, montoBs: +bs || 0 } : {}),
+      };
       const reg = {
         tipo: modo, items: carrito, total,
-        abonos: [{ fecha: ahora, monto: abonoNum }], abono: abonoNum, saldo,
+        abonos: pagoUSD > 0 || modo === 'apartado' ? [primerAbono] : [],
+        abono: pagoUSD, saldo,
         cliente: clienteSel, estado,
       };
       const { error } = await db({ table: 'ventas', action: 'insert', values: reg });
@@ -86,9 +100,9 @@ export function Ventas() {
         const it = inventario.find((x) => x.sku === c.sku);
         if (it) await db({ table: 'inventario', action: 'update', values: { stock: it.stock - c.cantidad }, filters: [{ type: 'eq', column: 'sku', value: c.sku }] });
       }
-      setCarrito([]); setAbono(''); setClienteSel(null); setQCliente('');
+      setCarrito([]); setPagado(''); setBs(''); setClienteSel(null); setQCliente('');
       await Promise.all([recargarInv(), recargarVen()]);
-      alert(`${modo === 'venta' ? 'Venta' : 'Apartado'} registrado ✓\nTotal ${money(total)}` + (modo === 'apartado' ? `\nSaldo pendiente ${money(saldo)}` : ''));
+      alert(`${modo === 'venta' ? 'Venta' : 'Apartado'} registrado ✓\nTotal ${money(total)} · Pagado ${money(pagoUSD)}` + (saldo > 0 ? `\nSaldo pendiente ${money(saldo)}` : ''));
     } finally {
       setGuardando(false);
     }
@@ -200,19 +214,37 @@ export function Ventas() {
             </div>
           )}
 
-          {modo === 'apartado' && (
+          {/* ===== Pago ===== */}
+          <Label>Método de pago</Label>
+          <select value={metodo} onChange={(e) => setMetodo(e.target.value as typeof metodo)}
+            className="flex h-9 w-full appearance-none rounded-md border border-input bg-white px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            {METODOS.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+          </select>
+          {monedaPago === 'BS' ? (
+            <div className="grid grid-cols-2 gap-x-3">
+              <div>
+                <Label>{modo === 'apartado' ? 'Abono' : 'Monto pagado'} (Bs)</Label>
+                <Input type="number" inputMode="decimal" placeholder="0" value={bs} onChange={(e) => setBs(e.target.value)} />
+              </div>
+              <div>
+                <Label>Tasa Bs/$</Label>
+                <Input type="number" inputMode="decimal" placeholder="0" value={tasa} onChange={(e) => setTasa(e.target.value)} />
+              </div>
+              <div className="col-span-2 mt-1 text-[12px] text-muted-foreground tabular">Equivale a {money(pagoUSD)}</div>
+            </div>
+          ) : (
             <>
-              <Label>Abono inicial (USD)</Label>
-              <Input type="number" inputMode="decimal" placeholder="0" value={abono} onChange={(e) => setAbono(e.target.value)} />
+              <Label>{modo === 'apartado' ? 'Abono inicial' : 'Monto pagado'} (USD)</Label>
+              <Input type="number" inputMode="decimal" placeholder={modo === 'venta' ? String(total) : '0'} value={pagado} onChange={(e) => setPagado(e.target.value)} />
             </>
           )}
 
           <div className="mt-4 flex items-center justify-between border-t-2 border-navy pt-3">
             <div>
               <div className="text-[12px] text-muted-foreground">Total</div>
-              {modo === 'apartado' && (
-                <div className="text-[11.5px] text-primary tabular">Abonado {money(abonoNum)} · Saldo {money(saldo)}</div>
-              )}
+              <div className={cn('text-[11.5px] tabular', quedaDebiendo ? 'font-semibold text-red-600' : 'text-muted-foreground')}>
+                Pagado {money(pagoUSD)}{quedaDebiendo ? ` · Queda debiendo ${money(saldo)}` : carrito.length ? ' · Pago completo' : ''}
+              </div>
             </div>
             <div className="text-2xl font-bold tabular">{money(total)}</div>
           </div>

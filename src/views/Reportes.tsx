@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
-import { Download, Trash2 } from 'lucide-react';
+import { AlertTriangle, Download, Trash2 } from 'lucide-react';
 import { useStore } from '@/store';
 import { db } from '@/lib/api';
-import { fmtFecha, fmtHora, getAbonos, hoyVz, mesVz, modeloKey, money, norm } from '@/lib/utils';
+import { diasDesde, fmtFecha, fmtHora, getAbonos, hoyVz, metodoLabel, modeloKey, money, sumAbonos } from '@/lib/utils';
 import { exportarVentas } from '@/lib/excel';
 import type { Venta } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,54 +10,90 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
+import { Badge } from '@/components/ui/badge';
 import { Thumb } from '@/components/Thumb';
+import { cn } from '@/lib/utils';
+
+type Periodo = 'hoy' | 'ayer' | '7d' | 'mes' | 'mesPasado' | 'todo' | 'custom';
+
+function rangoDe(p: Periodo, desde: string, hasta: string): [string, string] {
+  const hoy = hoyVz();
+  const d = new Date(hoy + 'T12:00:00');
+  const iso = (x: Date) => x.toISOString().slice(0, 10);
+  switch (p) {
+    case 'hoy': return [hoy, hoy];
+    case 'ayer': { const a = new Date(d); a.setDate(a.getDate() - 1); return [iso(a), iso(a)]; }
+    case '7d': { const a = new Date(d); a.setDate(a.getDate() - 6); return [iso(a), hoy]; }
+    case 'mes': return [hoy.slice(0, 7) + '-01', hoy];
+    case 'mesPasado': {
+      const a = new Date(d); a.setDate(1); a.setDate(0); // último día del mes pasado
+      return [iso(a).slice(0, 7) + '-01', iso(a)];
+    }
+    case 'todo': return ['0000-01-01', '9999-12-31'];
+    case 'custom': return [desde || '0000-01-01', hasta || '9999-12-31'];
+  }
+}
 
 export function Reportes() {
   const { ventas, inventario, fotosMap, esCeo, recargarInv, recargarVen } = useStore();
-  const [dia, setDia] = useState(hoyVz());
+  const [periodo, setPeriodo] = useState<Periodo>('hoy');
+  const [desde, setDesde] = useState(hoyVz());
+  const [hasta, setHasta] = useState(hoyVz());
   const [modeloRep, setModeloRep] = useState('');
 
   const vald = useMemo(() => ventas.filter((v) => v.estado !== 'cancelado'), [ventas]);
+  const [ini, fin] = rangoDe(periodo, desde, hasta);
+  const enRango = (f?: string | null) => { const d = (f || '').slice(0, 10); return d >= ini && d <= fin; };
 
-  const stats = useMemo(() => {
-    const hoy = hoyVz(), mes = mesVz();
-    let iHoy = 0, iMes = 0, iAll = 0, gMes = 0;
-    let nHoy = 0, nMes = 0;
+  /* ===== Métricas del período ===== */
+  const m = useMemo(() => {
+    let recibido = 0, pares = 0, totalVendido = 0, ganancia = 0, nVentas = 0;
+    const porMetodo: Record<string, number> = {};
     const mModelo: Record<string, number> = {}, mColor: Record<string, number> = {};
+    const transacciones: Venta[] = [];
+
     vald.forEach((v) => {
-      const fv = (v.fecha || '').slice(0, 10), mv = (v.fecha || '').slice(0, 7);
-      if (fv === hoy) nHoy++;
-      if (mv === mes) nMes++;
+      // Caja: cada abono cuenta en el día en que se recibió
       getAbonos(v).forEach((ab) => {
-        const f = (ab.fecha || '').slice(0, 10), m = (ab.fecha || '').slice(0, 7), mo = +ab.monto || 0;
-        iAll += mo; if (m === mes) iMes += mo; if (f === hoy) iHoy += mo;
-      });
-      (v.items || []).forEach((it) => {
-        const inv = inventario.find((x) => x.sku === it.sku);
-        const modelo = inv ? inv.modelo : it.nombre || '?';
-        const color = inv ? inv.color : '?';
-        mModelo[modelo] = (mModelo[modelo] || 0) + it.cantidad;
-        mColor[color] = (mColor[color] || 0) + it.cantidad;
-        if (v.estado === 'pagado') {
-          const g = (it.precio - (inv?.costo || 0)) * it.cantidad;
-          if (mv === mes) gMes += g;
+        if (enRango(ab.fecha)) {
+          const mo = +ab.monto || 0;
+          recibido += mo;
+          const key = metodoLabel(ab.metodo) || 'Sin registrar';
+          porMetodo[key] = (porMetodo[key] || 0) + mo;
         }
       });
+      // Transacciones: por fecha de la venta
+      if (enRango(v.fecha)) {
+        nVentas++;
+        totalVendido += v.total || 0;
+        transacciones.push(v);
+        (v.items || []).forEach((it) => {
+          pares += it.cantidad;
+          const inv = inventario.find((x) => x.sku === it.sku);
+          mModelo[inv ? inv.modelo : it.nombre || '?'] = (mModelo[inv ? inv.modelo : it.nombre || '?'] || 0) + it.cantidad;
+          mColor[inv ? inv.color : '?'] = (mColor[inv ? inv.color : '?'] || 0) + it.cantidad;
+          ganancia += (it.precio - (inv?.costo || 0)) * it.cantidad;
+        });
+      }
     });
-    return { iHoy, iMes, iAll, gMes, nHoy, nMes, mModelo, mColor };
-  }, [vald, inventario]);
+    transacciones.sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
+    return { recibido, pares, totalVendido, ganancia, nVentas, porMetodo, mModelo, mColor, transacciones };
+  }, [vald, inventario, ini, fin]);
 
-  const transDia = useMemo(() => vald.filter((v) => (v.fecha || '').slice(0, 10) === dia), [vald, dia]);
-  const recibidoDia = useMemo(() => {
-    let r = 0;
-    vald.forEach((v) => getAbonos(v).forEach((ab) => { if ((ab.fecha || '').slice(0, 10) === dia) r += +ab.monto || 0; }));
-    return r;
-  }, [vald, dia]);
+  /* ===== Deudas (independiente del período) ===== */
+  const deudas = useMemo(() => {
+    const d = vald
+      .filter((v) => v.estado === 'activo')
+      .map((v) => ({ v, pagado: sumAbonos(v), saldo: Math.max(0, (v.total || 0) - sumAbonos(v)), dias: diasDesde(v.fecha) }))
+      .filter((x) => x.saldo > 0)
+      .sort((a, b) => b.dias - a.dias);
+    return { lista: d, total: d.reduce((a, x) => a + x.saldo, 0) };
+  }, [vald]);
 
   const modelosOpc = useMemo(() => {
-    const m = new Map<string, string>();
-    inventario.forEach((i) => { const k = modeloKey(i); if (!m.has(k)) m.set(k, `${i.marca} ${i.modelo}${i.color ? ' · ' + i.color : ''}`); });
-    return [...m.entries()];
+    const mm = new Map<string, string>();
+    inventario.forEach((i) => { const k = modeloKey(i); if (!mm.has(k)) mm.set(k, `${i.marca} ${i.modelo}${i.color ? ' · ' + i.color : ''}`); });
+    return [...mm.entries()];
   }, [inventario]);
 
   const ventasModelo = useMemo(() => {
@@ -88,16 +124,16 @@ export function Reportes() {
     await Promise.all([recargarInv(), recargarVen()]);
   }
 
-  const Metric = ({ big, small }: { big: string; small: string }) => (
-    <div className="rounded-lg border bg-white p-4">
+  const Metric = ({ big, small, alerta }: { big: string; small: string; alerta?: boolean }) => (
+    <div className={cn('rounded-lg border bg-white p-4', alerta && 'border-red-200 bg-red-50/50')}>
       <div className="text-[12px] font-medium text-muted-foreground">{small}</div>
-      <div className="mt-1 text-2xl font-bold tabular text-navy">{big}</div>
+      <div className={cn('mt-1 text-2xl font-bold tabular', alerta ? 'text-red-700' : 'text-navy')}>{big}</div>
     </div>
   );
 
   const Barras = ({ obj }: { obj: Record<string, number> }) => {
     const arr = Object.entries(obj).filter(([k]) => k && k !== '?').sort((a, b) => b[1] - a[1]).slice(0, 5);
-    if (!arr.length) return <p className="py-4 text-center text-[13px] text-muted-foreground">Sin datos todavía</p>;
+    if (!arr.length) return <p className="py-4 text-center text-[13px] text-muted-foreground">Sin datos en este período</p>;
     const max = arr[0][1];
     return (
       <div className="space-y-2">
@@ -114,44 +150,125 @@ export function Reportes() {
     );
   };
 
+  const PERIODOS: { id: Periodo; label: string }[] = [
+    { id: 'hoy', label: 'Hoy' }, { id: 'ayer', label: 'Ayer' }, { id: '7d', label: '7 días' },
+    { id: 'mes', label: 'Este mes' }, { id: 'mesPasado', label: 'Mes pasado' }, { id: 'todo', label: 'Todo' }, { id: 'custom', label: 'Rango…' },
+  ];
+
   return (
     <div className="space-y-4">
-      <div className={`grid gap-3 ${esCeo ? 'grid-cols-2 lg:grid-cols-4' : 'grid-cols-3'}`}>
-        <Metric big={money(stats.iHoy)} small={`Hoy · ${stats.nHoy} ventas`} />
-        <Metric big={money(stats.iMes)} small={`Este mes · ${stats.nMes} ventas`} />
-        <Metric big={money(stats.iAll)} small="Recibido total" />
-        {esCeo && <Metric big={money(Math.round(stats.gMes))} small="Ganancia del mes" />}
+      {/* ===== Filtro de período ===== */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {PERIODOS.map((p) => (
+          <button key={p.id} onClick={() => setPeriodo(p.id)}
+            className={cn('rounded-full border px-3 py-1.5 text-[13px] font-medium transition-colors',
+              periodo === p.id ? 'border-navy bg-navy text-white' : 'bg-white text-foreground hover:bg-secondary')}>
+            {p.label}
+          </button>
+        ))}
+        {periodo === 'custom' && (
+          <div className="flex items-center gap-1.5">
+            <Input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} className="h-8 w-auto" />
+            <span className="text-muted-foreground">→</span>
+            <Input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} className="h-8 w-auto" />
+          </div>
+        )}
+        <Button variant="secondary" size="sm" className="ml-auto" onClick={() => exportarVentas(ventas)}>
+          <Download className="h-4 w-4" /> Exportar Excel
+        </Button>
       </div>
 
-      <Button variant="secondary" onClick={() => exportarVentas(ventas)}><Download className="h-4 w-4" /> Exportar ventas a Excel</Button>
+      {/* ===== Métricas del período ===== */}
+      <div className={`grid gap-3 grid-cols-2 ${esCeo ? 'lg:grid-cols-5' : 'lg:grid-cols-4'}`}>
+        <Metric big={money(m.recibido)} small="Recibido en caja" />
+        <Metric big={String(m.nVentas)} small="Transacciones" />
+        <Metric big={String(m.pares)} small="Pares vendidos" />
+        <Metric big={m.nVentas ? money(m.totalVendido / m.nVentas) : '$0'} small="Ticket promedio" />
+        {esCeo && <Metric big={money(Math.round(m.ganancia))} small="Ganancia estimada" />}
+      </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader><CardTitle>Ventas por día</CardTitle></CardHeader>
+        {/* ===== Deudas ===== */}
+        <Card className={deudas.lista.length ? 'border-amber-200' : ''}>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-amber-600" />
+              Deudas pendientes · {money(deudas.total)}
+            </CardTitle>
+          </CardHeader>
           <CardContent>
-            <Label>Elige un día</Label>
-            <Input type="date" value={dia} onChange={(e) => setDia(e.target.value)} />
-            <div className="mt-3 rounded-lg border bg-secondary/50 p-3 text-center">
-              <div className="text-xl font-bold tabular text-navy">{money(recibidoDia)}</div>
-              <div className="text-[12px] text-muted-foreground">Recibido en caja ese día · {transDia.length} transacción(es)</div>
-            </div>
-            <div className="mt-2 space-y-1.5">
-              {!transDia.length && <p className="py-4 text-center text-[13px] text-muted-foreground">No hubo transacciones ese día</p>}
-              {transDia.map((v) => (
+            {!deudas.lista.length && <p className="py-4 text-center text-[13px] text-muted-foreground">Nadie debe nada 🎉</p>}
+            <div className="space-y-1.5">
+              {deudas.lista.map(({ v, pagado, saldo, dias }) => (
                 <div key={v.id} className="flex items-center gap-2.5 rounded-lg border px-3 py-2">
-                  <Thumb src={fotoDeSku(v.items?.[0]?.sku)} size={40} />
                   <div className="min-w-0 flex-1">
-                    <div className="text-[13.5px] font-medium tabular">{(v.items || []).reduce((a, i) => a + i.cantidad, 0)} par(es) · {money(v.total)}</div>
-                    <div className="text-[11.5px] text-muted-foreground">{fmtHora(v.fecha)} · {v.tipo}{v.estado === 'activo' ? ' (apartado activo)' : ''}{v.cliente ? ' · ' + v.cliente.nombre : ''}</div>
-                    <div className="truncate text-[11px] text-primary/80">{(v.items || []).map((i) => i.nombre).join(', ')}</div>
+                    <div className="text-[13.5px] font-semibold">{v.cliente?.nombre || 'Sin clienta'}
+                      <Badge variant={dias > 30 ? 'out' : dias > 14 ? 'low' : 'default'} className="ml-2">hace {dias} día(s)</Badge>
+                    </div>
+                    <div className="text-[11.5px] text-muted-foreground">
+                      desde {fmtFecha(v.fecha)} · {v.tipo === 'apartado' ? 'apartado' : 'venta a crédito'} · {(v.items || []).map((i) => i.nombre).join(', ')}
+                    </div>
+                    <div className="text-[12.5px] tabular">Total {money(v.total)} · Abonado {money(pagado)} · <b className="text-red-700">Debe {money(saldo)}</b></div>
                   </div>
-                  {esCeo && <Button size="icon" variant="destructive" onClick={() => eliminarVenta(v)}><Trash2 className="h-3.5 w-3.5" /></Button>}
                 </div>
               ))}
             </div>
           </CardContent>
         </Card>
 
+        {/* ===== Caja por método de pago ===== */}
+        <Card className="self-start">
+          <CardHeader><CardTitle>Caja por método de pago</CardTitle></CardHeader>
+          <CardContent>
+            {!Object.keys(m.porMetodo).length && <p className="py-4 text-center text-[13px] text-muted-foreground">Sin pagos en este período</p>}
+            <div className="divide-y">
+              {Object.entries(m.porMetodo).sort((a, b) => b[1] - a[1]).map(([k, v]) => (
+                <div key={k} className="flex items-center justify-between py-2 text-[13.5px]">
+                  <span>{k}</span>
+                  <b className="tabular">{money(v)}</b>
+                </div>
+              ))}
+              {Object.keys(m.porMetodo).length > 0 && (
+                <div className="flex items-center justify-between py-2 text-[13.5px] font-bold">
+                  <span>Total</span><span className="tabular">{money(m.recibido)}</span>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* ===== Transacciones del período ===== */}
+        <Card>
+          <CardHeader><CardTitle>Transacciones del período ({m.transacciones.length})</CardTitle></CardHeader>
+          <CardContent>
+            {!m.transacciones.length && <p className="py-4 text-center text-[13px] text-muted-foreground">No hubo transacciones</p>}
+            <div className="max-h-[28rem] space-y-1.5 overflow-auto">
+              {m.transacciones.map((v) => {
+                const pagado = sumAbonos(v);
+                const saldo = Math.max(0, (v.total || 0) - pagado);
+                const metodos = [...new Set(getAbonos(v).map((a) => metodoLabel(a.metodo)).filter(Boolean))].join(', ');
+                return (
+                  <div key={v.id} className="flex items-center gap-2.5 rounded-lg border px-3 py-2">
+                    <Thumb src={fotoDeSku(v.items?.[0]?.sku)} size={40} />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[13.5px] font-medium tabular">
+                        {(v.items || []).reduce((a, i) => a + i.cantidad, 0)} par(es) · {money(v.total)}
+                        {saldo > 0 && <span className="text-red-700"> · debe {money(saldo)}</span>}
+                      </div>
+                      <div className="text-[11.5px] text-muted-foreground">
+                        {fmtFecha(v.fecha)} {fmtHora(v.fecha)} · {v.tipo}{v.estado === 'activo' ? ' (pendiente)' : ''}{v.cliente ? ' · ' + v.cliente.nombre : ''}{metodos ? ' · ' + metodos : ''}
+                      </div>
+                      <div className="truncate text-[11px] text-muted-foreground/80">{(v.items || []).map((i) => i.nombre).join(', ')}</div>
+                    </div>
+                    {esCeo && <Button size="icon" variant="destructive" onClick={() => eliminarVenta(v)}><Trash2 className="h-3.5 w-3.5" /></Button>}
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* ===== Ventas por modelo ===== */}
         <Card className="self-start">
           <CardHeader><CardTitle>Ventas por modelo</CardTitle></CardHeader>
           <CardContent>
@@ -166,7 +283,7 @@ export function Reportes() {
                   <div className="text-xl font-bold tabular text-navy">{ventasModelo.pares} par(es)</div>
                   <div className="text-[12px] text-muted-foreground">vendidos de este modelo · {ventasModelo.res.length} venta(s)</div>
                 </div>
-                <div className="mt-2 space-y-1.5">
+                <div className="mt-2 max-h-72 space-y-1.5 overflow-auto">
                   {!ventasModelo.res.length && <p className="py-4 text-center text-[13px] text-muted-foreground">No hay ventas de ese modelo todavía</p>}
                   {ventasModelo.res.map((v) => {
                     const its = (v.items || []).filter((it) => ventasModelo.skus.has(it.sku));
@@ -176,7 +293,7 @@ export function Reportes() {
                         <div className="min-w-0">
                           <div className="truncate text-[13px] font-medium">{its.map((i) => i.nombre).join(', ')}</div>
                           <div className="text-[11.5px] text-muted-foreground">
-                            {fmtFecha(v.fecha)} {fmtHora(v.fecha)} · {v.tipo}{v.estado === 'activo' ? ' (apartado)' : ''}{v.cliente ? ' · ' + v.cliente.nombre : ' · sin clienta'}
+                            {fmtFecha(v.fecha)} {fmtHora(v.fecha)} · {v.tipo}{v.estado === 'activo' ? ' (pendiente)' : ''}{v.cliente ? ' · ' + v.cliente.nombre : ' · sin clienta'}
                           </div>
                         </div>
                       </div>
@@ -189,12 +306,12 @@ export function Reportes() {
         </Card>
 
         <Card className="self-start">
-          <CardHeader><CardTitle>Modelos más vendidos</CardTitle></CardHeader>
-          <CardContent><Barras obj={stats.mModelo} /></CardContent>
+          <CardHeader><CardTitle>Modelos más vendidos (período)</CardTitle></CardHeader>
+          <CardContent><Barras obj={m.mModelo} /></CardContent>
         </Card>
         <Card className="self-start">
-          <CardHeader><CardTitle>Colores más vendidos</CardTitle></CardHeader>
-          <CardContent><Barras obj={stats.mColor} /></CardContent>
+          <CardHeader><CardTitle>Colores más vendidos (período)</CardTitle></CardHeader>
+          <CardContent><Barras obj={m.mColor} /></CardContent>
         </Card>
       </div>
     </div>

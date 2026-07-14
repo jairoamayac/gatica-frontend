@@ -92,3 +92,38 @@ export function comprimirImagen(file: File): Promise<string> {
 
 export const money = (n: number) => '$' + (Math.round(n * 100) / 100).toLocaleString('en-US');
 export const TALLAS_CORRIDA = ['5.5', '6', '6.5', '7', '7.5', '8', '8.5', '9', '9.5', '10'];
+
+/* ===== Métodos de pago ===== */
+export const METODOS: { id: import('./types').MetodoPago; label: string; moneda: 'USD' | 'BS' }[] = [
+  { id: 'efectivo_usd', label: 'Efectivo $', moneda: 'USD' },
+  { id: 'efectivo_bs', label: 'Efectivo Bs', moneda: 'BS' },
+  { id: 'pago_movil', label: 'Pago Móvil (Bs)', moneda: 'BS' },
+  { id: 'punto', label: 'Punto de venta (Bs)', moneda: 'BS' },
+  { id: 'zelle', label: 'Zelle', moneda: 'USD' },
+  { id: 'transferencia', label: 'Transferencia $', moneda: 'USD' },
+  { id: 'otro', label: 'Otro', moneda: 'USD' },
+];
+export const metodoLabel = (m?: string) => METODOS.find((x) => x.id === m)?.label ?? '';
+
+/* ===== Buscador multi-palabra =====
+   Cada palabra del query debe aparecer en algún campo del zapato; los números
+   además cuentan como talla exacta. Así "vivan 8", "8 vivan" o "rojo vivan 7.5"
+   encuentran la variante aunque los datos vivan en columnas distintas. */
+export function coincide(i: InvItem, q: string): boolean {
+  const tokens = norm(q).split(/\s+/).filter(Boolean);
+  if (!tokens.length) return false;
+  const hay = norm(`${i.marca} ${i.modelo} ${i.nombre} ${i.color} ${i.sku}`);
+  const hayTexto = norm(`${i.marca} ${i.modelo} ${i.nombre} ${i.color}`);
+  const talla = norm(i.talla);
+  return tokens.every((t) =>
+    /^\d+(\.\d+)?$/.test(t)
+      ? talla === t || hayTexto.includes(t) // números = talla exacta (o parte del nombre del modelo)
+      : hay.includes(t)
+  );
+}
+
+/* Días transcurridos desde una fecha (para antigüedad de deudas) */
+export function diasDesde(fecha?: string | null): number {
+  if (!fecha) return 0;
+  return Math.max(0, Math.floor((Date.now() - new Date(fecha).getTime()) / 86400000));
+}
