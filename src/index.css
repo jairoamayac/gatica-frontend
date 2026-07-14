@@ -1,0 +1,33 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Tema estilo Stripe Dashboard: blanco, gris #F6F8FA, índigo #635BFF, navy #0A2540 */
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 213 73% 15%;
+    --card: 0 0% 100%;
+    --card-foreground: 213 73% 15%;
+    --primary: 243 100% 68%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 25% 97%;
+    --secondary-foreground: 213 73% 15%;
+    --muted: 210 25% 97%;
+    --muted-foreground: 215 18% 45%;
+    --accent: 243 100% 97%;
+    --accent-foreground: 243 75% 50%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 213 24% 91%;
+    --input: 213 24% 88%;
+    --ring: 243 100% 68%;
+  }
+  * { @apply border-border; }
+  body { @apply bg-background text-foreground font-sans antialiased text-[14px]; }
+  h1, h2, h3 { @apply text-navy; }
+}
+
+@layer utilities {
+  .tabular { font-variant-numeric: tabular-nums; }
+}
