@@ -7,6 +7,7 @@ import { Inventario } from './views/Inventario';
 import { Clientas } from './views/Clientas';
 import { Apartados } from './views/Apartados';
 import { Reportes } from './views/Reportes';
+import { InstallPrompt } from './components/InstallPrompt';
 
 export default function App() {
   const { sesion } = useStore();
@@ -21,6 +22,7 @@ export default function App() {
       {vista === 'clientas' && <Clientas />}
       {vista === 'apartados' && <Apartados />}
       {vista === 'reportes' && <Reportes />}
+      <InstallPrompt />
     </Layout>
   );
 }

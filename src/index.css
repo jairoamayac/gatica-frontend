@@ -24,8 +24,21 @@
     --ring: 0 0% 9%;
   }
   * { @apply border-border; }
-  body { @apply bg-background text-foreground font-sans antialiased text-[14px]; }
+  html, body {
+    height: 100%;
+    overscroll-behavior: none; /* sin rebote/pull-to-refresh: se siente como app nativa */
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased text-[14px];
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none; /* sin menú al mantener presionado */
+    touch-action: manipulation;  /* sin zoom por doble toque */
+  }
   h1, h2, h3 { @apply text-navy; }
+
+  /* Texto no seleccionable en la interfaz (como una app), salvo campos e importes */
+  button, nav, aside, header, label, .select-none { user-select: none; -webkit-user-select: none; }
+  input, textarea, select, [contenteditable], .tabular { user-select: text; -webkit-user-select: text; }
 }
 
 @layer utilities {
