@@ -52,6 +52,8 @@ export interface Clienta {
   telefono?: string;
   cedula?: string;
   nota?: string;
+  // Columna opcional: existe solo si se corrió `alter table clientas add column cumple date;`
+  cumple?: string | null;
 }
 
 export interface Sesion {

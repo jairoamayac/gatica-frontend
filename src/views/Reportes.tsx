@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { AlertTriangle, Download, Trash2 } from 'lucide-react';
 import { useStore } from '@/store';
 import { db } from '@/lib/api';
-import { diasDesde, fmtFecha, fmtHora, getAbonos, hoyVz, metodoLabel, modeloKey, money, sumAbonos } from '@/lib/utils';
+import { diasDesde, edad, fmtFecha, fmtHora, getAbonos, hoyVz, metodoLabel, modeloKey, money, sumAbonos } from '@/lib/utils';
 import { exportarVentas } from '@/lib/excel';
 import type { Venta } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -35,7 +35,7 @@ function rangoDe(p: Periodo, desde: string, hasta: string): [string, string] {
 }
 
 export function Reportes() {
-  const { ventas, inventario, fotosMap, esCeo, recargarInv, recargarVen } = useStore();
+  const { ventas, inventario, clientas, fotosMap, esCeo, recargarInv, recargarVen } = useStore();
   const [periodo, setPeriodo] = useState<Periodo>('hoy');
   const [desde, setDesde] = useState(hoyVz());
   const [hasta, setHasta] = useState(hoyVz());
@@ -89,6 +89,47 @@ export function Reportes() {
       .sort((a, b) => b.dias - a.dias);
     return { lista: d, total: d.reduce((a, x) => a + x.saldo, 0) };
   }, [vald]);
+
+  /* ===== Analítica de clientas ===== */
+  const cli = useMemo(() => {
+    // Gasto por clienta dentro del período (por abonos recibidos)
+    const gasto: Record<number, number> = {};
+    let conClienta = 0, sinClienta = 0;
+    vald.forEach((v) => {
+      if (enRango(v.fecha)) { v.cliente ? conClienta++ : sinClienta++; }
+      if (v.cliente) {
+        getAbonos(v).forEach((ab) => { if (enRango(ab.fecha)) gasto[v.cliente!.id] = (gasto[v.cliente!.id] || 0) + (+ab.monto || 0); });
+      }
+    });
+    const top = Object.entries(gasto)
+      .map(([id, monto]) => ({ c: clientas.find((x) => x.id === +id), monto }))
+      .filter((x) => x.c && x.monto > 0)
+      .sort((a, b) => b.monto - a.monto)
+      .slice(0, 5);
+
+    // Última compra por clienta (histórico) → inactivas hace más de 60 días
+    const ultima: Record<number, string> = {};
+    vald.forEach((v) => {
+      if (v.cliente && (!ultima[v.cliente.id] || (v.fecha || '') > ultima[v.cliente.id])) ultima[v.cliente.id] = v.fecha || '';
+    });
+    const inactivas = Object.entries(ultima)
+      .map(([id, f]) => ({ c: clientas.find((x) => x.id === +id), dias: diasDesde(f) }))
+      .filter((x) => x.c && x.dias > 60)
+      .sort((a, b) => b.dias - a.dias)
+      .slice(0, 5);
+
+    // Demografía (solo si hay fechas de nacimiento cargadas)
+    const edades = clientas.map((c) => edad(c.cumple)).filter((e): e is number => e != null);
+    const rangos: Record<string, number> = {};
+    edades.forEach((e) => {
+      const r = e < 20 ? '< 20' : e < 30 ? '20–29' : e < 40 ? '30–39' : e < 50 ? '40–49' : '50+';
+      rangos[r] = (rangos[r] || 0) + 1;
+    });
+    const mesActual = hoyVz().slice(5, 7);
+    const cumpleaneras = clientas.filter((c) => c.cumple && c.cumple.slice(5, 7) === mesActual);
+
+    return { top, conClienta, sinClienta, inactivas, edades, rangos, cumpleaneras };
+  }, [vald, clientas, ini, fin]);
 
   const modelosOpc = useMemo(() => {
     const mm = new Map<string, string>();
@@ -234,6 +275,72 @@ export function Reportes() {
                 </div>
               )}
             </div>
+          </CardContent>
+        </Card>
+
+        {/* ===== Clientas ===== */}
+        <Card className="self-start">
+          <CardHeader><CardTitle>Clientas</CardTitle></CardHeader>
+          <CardContent>
+            <div className="mb-3 grid grid-cols-2 gap-2">
+              <div className="rounded-lg border bg-secondary/40 p-3 text-center">
+                <div className="text-lg font-bold tabular text-navy">{cli.conClienta + cli.sinClienta ? Math.round((cli.conClienta / (cli.conClienta + cli.sinClienta)) * 100) : 0}%</div>
+                <div className="text-[11px] text-muted-foreground">ventas con clienta asignada</div>
+              </div>
+              <div className="rounded-lg border bg-secondary/40 p-3 text-center">
+                <div className="text-lg font-bold tabular text-navy">{clientas.length}</div>
+                <div className="text-[11px] text-muted-foreground">clientas registradas</div>
+              </div>
+            </div>
+
+            <h4 className="text-[12.5px] font-semibold text-muted-foreground">Top compradoras del período</h4>
+            <div className="mt-1 divide-y">
+              {!cli.top.length && <p className="py-3 text-center text-[12.5px] text-muted-foreground">Sin compras con clienta en este período</p>}
+              {cli.top.map(({ c, monto }, idx) => (
+                <div key={c!.id} className="flex items-center justify-between py-1.5 text-[13px]">
+                  <span className="truncate"><span className="mr-1.5 text-muted-foreground">{idx + 1}.</span>{c!.nombre}{edad(c!.cumple) != null ? ` · ${edad(c!.cumple)} años` : ''}</span>
+                  <b className="tabular">{money(monto)}</b>
+                </div>
+              ))}
+            </div>
+
+            {cli.inactivas.length > 0 && (
+              <>
+                <h4 className="mt-3 text-[12.5px] font-semibold text-muted-foreground">No vuelven hace más de 60 días</h4>
+                <div className="mt-1 space-y-1">
+                  {cli.inactivas.map(({ c, dias }) => (
+                    <div key={c!.id} className="flex items-center justify-between text-[12.5px]">
+                      <span className="truncate">{c!.nombre}</span>
+                      <Badge variant="low">hace {dias} días</Badge>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {cli.edades.length > 0 ? (
+              <>
+                <h4 className="mt-3 text-[12.5px] font-semibold text-muted-foreground">Edades ({cli.edades.length} con fecha de nacimiento)</h4>
+                <div className="mt-1 space-y-1.5">
+                  {Object.entries(cli.rangos).sort().map(([r, n]) => (
+                    <div key={r} className="flex items-center gap-2 text-[12.5px]">
+                      <span className="w-12">{r}</span>
+                      <div className="h-3 flex-1 overflow-hidden rounded bg-secondary">
+                        <div className="h-full rounded bg-primary" style={{ width: Math.round((n / cli.edades.length) * 100) + '%' }} />
+                      </div>
+                      <b className="tabular">{n}</b>
+                    </div>
+                  ))}
+                </div>
+                {cli.cumpleaneras.length > 0 && (
+                  <p className="mt-2 text-[12.5px]">🎂 Cumplen este mes: <b>{cli.cumpleaneras.map((c) => c.nombre).join(', ')}</b></p>
+                )}
+              </>
+            ) : (
+              <p className="mt-3 text-[11.5px] text-muted-foreground">
+                Tip: registra la fecha de nacimiento de las clientas (pestaña Clientas) para ver edades y cumpleañeras del mes aquí.
+              </p>
+            )}
           </CardContent>
         </Card>
 

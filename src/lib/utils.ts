@@ -127,3 +127,14 @@ export function diasDesde(fecha?: string | null): number {
   if (!fecha) return 0;
   return Math.max(0, Math.floor((Date.now() - new Date(fecha).getTime()) / 86400000));
 }
+
+/* Edad a partir de la fecha de nacimiento (columna opcional `cumple`) */
+export function edad(cumple?: string | null): number | null {
+  if (!cumple) return null;
+  const n = new Date(cumple + 'T12:00:00');
+  if (isNaN(n.getTime())) return null;
+  const hoy = new Date(hoyVz() + 'T12:00:00');
+  let e = hoy.getFullYear() - n.getFullYear();
+  if (hoy.getMonth() < n.getMonth() || (hoy.getMonth() === n.getMonth() && hoy.getDate() < n.getDate())) e--;
+  return e >= 0 && e < 120 ? e : null;
+}
